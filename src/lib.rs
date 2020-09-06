@@ -12,7 +12,7 @@ pub struct Person {
     pub name: String,
 
     infection: Option<Infection>,
-    tested_positive: bool,
+    tested_positive: bool, // TODO tested date
 }
 
 /// Infection data
@@ -39,33 +39,34 @@ impl Person {
     }
 
     /// Runs a test on a person
-    pub fn test(self: &mut Self) {
+    pub fn test(self: &mut Self, _date: Time) {
         self.tested_positive = self.infection.is_some();
     }
 
     /// Interacts two people
     pub fn interact(self: &mut Self, date: Time, other: &mut Self) {
-        if other.is_contagious() {
+        if other.is_contagious(date) {
             self.expose(date, "other".to_string(), 1.0); // TODO name
         }
 
-        if self.is_contagious() {
+        if self.is_contagious(date) {
             other.expose(date, "self".to_string(), 1.0); // TODO name
         }
     }
 
     /// Is this person able to infect others?
-    pub fn is_contagious(self: &Self) -> bool {
-        self.was_sick() // TODO
+    pub fn is_contagious(self: &Self, date: Time) -> bool {
+        self.was_sick(date) // TODO
     }
 
     /// Is this person in a state where they should be isolating?
-    pub fn is_isolating(self: &Self) -> bool {
+    pub fn is_isolating(self: &Self, _date: Time) -> bool {
+        // TODO
         self.tested_positive
     }
 
     /// Has this person *ever* been infected?
-    pub fn was_sick(self: &Self) -> bool {
+    pub fn was_sick(self: &Self, _date: Time) -> bool {
         self.infection.is_some()
     }
 }
@@ -83,31 +84,31 @@ mod test {
         me.expose(3, "MIT".to_string(), 1.0);
 
         // Don't know better yet, should *not* be isolating...
-        assert!(!me.is_isolating());
-        assert!(me.was_sick()); // ...but am sick (hidden state)
+        assert!(!me.is_isolating(4));
+        assert!(me.was_sick(4)); // ...but am sick (hidden state)
 
         // Get tested
-        me.test();
+        me.test(5);
 
         // Really should be isolating
-        assert!(me.is_isolating());
-        assert!(me.was_sick());
+        assert!(me.is_isolating(6));
+        assert!(me.was_sick(6));
     }
 
     #[test]
     fn interaction() {
         let mut healthy_me = Person::new("Olivia Healthy".to_string());
         let mut sick_me = Person::new("Olivia Sick".to_string());
-        assert!(!healthy_me.was_sick());
-        assert!(!sick_me.was_sick());
+        assert!(!healthy_me.was_sick(0));
+        assert!(!sick_me.was_sick(0));
 
         // Sick me is sick
         sick_me.expose(1, "MIT".to_string(), 1.0);
-        assert!(sick_me.was_sick());
+        assert!(sick_me.was_sick(2));
 
         // Interact
         sick_me.interact(3, &mut healthy_me);
-        assert!(sick_me.was_sick()); // should still be sick
-        assert!(healthy_me.was_sick()); // should *also* be sick
+        assert!(sick_me.was_sick(4)); // should still be sick
+        assert!(healthy_me.was_sick(4)); // should *also* be sick
     }
 }
