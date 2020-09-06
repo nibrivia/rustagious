@@ -112,3 +112,9 @@ mod test {
         assert!(healthy_me.was_sick(4)); // should *also* be sick
     }
 }
+
+/// Returns the odds of a person being contagious `t` after infection
+pub fn p_contagious(_t: Time) -> f64 {
+    // TODO
+    1.0
+}
