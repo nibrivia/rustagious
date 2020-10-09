@@ -3,44 +3,76 @@
 
 //! ???
 
-use rustagious::{phase, Person, Phase};
+use rayon::prelude::*;
+use rustagious::{gen_phase_fn, Person, Phase};
 use std::collections::HashMap;
 
-type Res = (String, String, String);
+//type Res = (String, u64, String, u64, String, u64);
+type Res = (u64, u64);
 
 fn main() {
-    let res = run_n(100_000);
-    let mut ord = Vec::new();
+    println!("a, ac, c, ca, b_test, n, tot_days_unaware, n_infected");
+    let n = 1_000;
+    //for (a, ac, c, ca) in gen_phases() {
+    gen_phases()
+        .par_iter()
+        .map(move |phase_desc| {
+            let (a, ac, c, ca) = *phase_desc;
+            let cycle_len = a + ac + c + ca;
 
-    //let mut tot = 0;
-    for (k, v) in res {
-        ord.push((v, k));
-        //tot += v;
-    }
-    ord.sort();
+            let phase_fn = &gen_phase_fn(a, ac, c, ca);
+            let outcomes = run_n(n, None, cycle_len, phase_fn);
+            for (res, n) in outcomes {
+                println!(
+                    "{}, {}, {}, {}, {}, {}, {}, {}",
+                    a, ac, c, ca, "NA", n, res.0, res.1
+                );
+            }
 
-    for (v, k) in &ord {
-        println!(
-            "{:.0} {} {} {}",
-            //(500. * (*v as f64)) / tot as f64,
-            v,
-            k.0,
-            k.1,
-            k.2,
-            //k.3,
-            //k.4
-        );
-    }
-    //printerr!("done");
+            for b_test in a + ac + c - 5..cycle_len {
+                let outcomes = run_n(n, Some(b_test), cycle_len, phase_fn);
+                for (res, n) in outcomes {
+                    println!(
+                        "{}, {}, {}, {}, {}, {}, {}, {}",
+                        a, ac, c, ca, b_test, n, res.0, res.1
+                    );
+                }
+            }
+        })
+        .collect::<()>();
 }
 
-fn run_n(n: u64) -> HashMap<Res, u64> {
+fn gen_phases() -> Vec<(u64, u64, u64, u64)> {
+    let mut phases = Vec::new();
+    for duration in (14..43).step_by(14) {
+        for tot_isolation_days in (0..15).step_by(2) {
+            let phase_duration = (duration - tot_isolation_days) / 2;
+            if phase_duration < 5 {
+                continue;
+            }
+            for ac in 0..(tot_isolation_days + 1) {
+                if ac > 5 || tot_isolation_days - ac > 5 {
+                    continue;
+                }
+                phases.push((phase_duration, ac, phase_duration, tot_isolation_days - ac));
+            }
+        }
+    }
+    phases
+}
+
+fn run_n(
+    n: u64,
+    b_test: Option<u64>,
+    cycle_len: u64,
+    phase_fn: &Box<dyn Fn(u64) -> Phase>,
+) -> HashMap<Res, u64> {
     let mut res = HashMap::new();
 
     for day in 0..6 * 7 {
         for source in 1..4 {
             for _ in 0..n {
-                let run = run_trial(day, source);
+                let run = run_trial(day, source, b_test, cycle_len, phase_fn);
                 let cur = res.get(&run).or_else(|| Some(&0)).unwrap() + 1;
                 res.insert(run, cur);
             }
@@ -50,7 +82,13 @@ fn run_n(n: u64) -> HashMap<Res, u64> {
 }
 
 /// Runs a single experiment
-fn run_trial(moment: u64, who: u64) -> Res {
+fn run_trial(
+    moment: u64,
+    who: u64,
+    b_test: Option<u64>,
+    cycle_len: u64,
+    phase_fn: &Box<dyn Fn(u64) -> Phase>,
+) -> Res {
     //let mut z = Person::new("0".to_string());
     let mut a = Person::new("A".to_string());
     let mut b = Person::new("B".to_string());
@@ -66,7 +104,9 @@ fn run_trial(moment: u64, who: u64) -> Res {
         _ => unreachable!(),
     }
 
-    for day in 0..300 {
+    let mut max_day = 0;
+    for day in moment..300 {
+        max_day = day;
         if
         //z.is_isolating(day) ||
         a.is_isolating(day) || b.is_isolating(day) || c.is_isolating(day)
@@ -78,6 +118,8 @@ fn run_trial(moment: u64, who: u64) -> Res {
         match day % 7 {
             2 | 5 => {
                 a.test(day);
+                //b.test(day);
+                //c.test(day);
             }
             3 | 6 => {
                 //z.test(day);
@@ -85,8 +127,11 @@ fn run_trial(moment: u64, who: u64) -> Res {
             _ => {}
         }
 
-        //c.interact(day, &mut d);
-        match phase(day) {
+        if b_test.is_some() && day % cycle_len == b_test.unwrap() {
+            b.test(day);
+        }
+
+        match phase_fn(day) {
             Phase::A => b.interact(day, &mut a),
             Phase::C => {
                 // a.interact(day, &mut z);
@@ -96,23 +141,13 @@ fn run_trial(moment: u64, who: u64) -> Res {
         }
     }
 
-    //a.health_summary();
-    //b.health_summary();
-    //c.health_summary();
-
-    //println!("A: {:?}", a.get_infection());
-    //println!("B: {:?}", b.get_infection());
-    //println!("C: {:?}", c.get_infection());
-
     (
-        //get_source(&z),
-        get_source(&a),
-        get_source(&b),
-        get_source(&c),
-        //get_source(&d),
+        a.days_unaware(max_day) + b.days_unaware(max_day) + c.days_unaware(max_day),
+        a.was_sick(max_day) as u64 + b.was_sick(max_day) as u64 + c.was_sick(max_day) as u64,
     )
 }
 
+/*
 fn get_source(p: &Person) -> String {
     if let Some(infection) = p.get_infection() {
         infection.source.to_string()
@@ -120,3 +155,4 @@ fn get_source(p: &Person) -> String {
         "-.00".to_string()
     }
 }
+*/

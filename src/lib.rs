@@ -5,6 +5,7 @@
 
 use rand::distributions::{Bernoulli, Distribution};
 use rand_distr::LogNormal;
+use std::cmp::min;
 
 type Time = u64;
 
@@ -62,7 +63,7 @@ impl Person {
         let symptomatic_date: Time = date + log_normal.sample(&mut rng).round() as Time;
         let testable_date = symptomatic_date - 2;
         let contagious_date = symptomatic_date - 2;
-        let recovery_date = symptomatic_date + 14;
+        let recovery_date = symptomatic_date + 10;
 
         // Do we show symptoms
         let d = Bernoulli::new(0.6).unwrap();
@@ -127,9 +128,22 @@ impl Person {
         &self.infection
     }
 
+    /// Returns the number of days that this person was carrying the virus unaware
+    pub fn days_unaware(self: &Self, date: Time) -> u64 {
+        if let Some(infection) = &self.infection {
+            if min(infection.recovery_date, date) > infection.contagious_date {
+                min(infection.recovery_date, date) - infection.contagious_date
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
+
     /// Has this person *ever* been infected?
     pub fn was_sick(self: &Self, date: Time) -> bool {
-        println!("{} {:?}", self.name, self.infection);
+        //println!("{} {:?}", self.name, self.infection);
         if let Some(infection) = &self.infection {
             return infection.date <= date;
         }
@@ -165,6 +179,23 @@ pub enum Phase {
     C,
 }
 
+/// Returns custom phase function
+pub fn gen_phase_fn(a: u64, ac: u64, c: u64, ca: u64) -> Box<dyn Fn(Time) -> Phase> {
+    let cycle_len = a + ac + c + ca;
+    Box::new(move |day| {
+        let cycle_day = day % cycle_len;
+        if cycle_day <= a {
+            Phase::A
+        } else if cycle_day <= a + ac {
+            Phase::Isolate
+        } else if cycle_day <= a + ac + c {
+            Phase::C
+        } else {
+            Phase::Isolate
+        }
+    })
+}
+
 /// An example phase function
 pub fn phase(day: u64) -> Phase {
     let cycle_day = day % (6 * 7);
@@ -172,6 +203,8 @@ pub fn phase(day: u64) -> Phase {
         Phase::A
     } else if cycle_day >= 21 && cycle_day <= 36 {
         Phase::C
+    //} else if cycle_day >= 40 {
+    //Phase::A
     } else {
         Phase::Isolate
     }
