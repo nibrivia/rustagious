@@ -19,7 +19,7 @@ pub struct Person {
     pub name: String,
 
     infection: Option<Infection>,
-    tested_positive: bool, // TODO tested date
+    tested_positive: Option<Time>,
 }
 
 /// Infection data
@@ -32,10 +32,8 @@ pub struct Infection {
     recovery_date: Time,
 
     symptomatic_date: Option<Time>,
-
-    // TODO hacky
-    /// Infection's original source
-    pub source: String,
+    // Infection's original source
+    //pub source: String,
 }
 
 impl Person {
@@ -44,12 +42,12 @@ impl Person {
         Person {
             name,
             infection: None,
-            tested_positive: false,
+            tested_positive: None,
         }
     }
 
     /// Exposes a person to a source on a given date
-    pub fn expose(self: &mut Self, date: Time, source: String) {
+    pub fn expose(self: &mut Self, date: Time /*source: String*/) {
         // already infected, let's not do this again...
         if self.infection.is_some() {
             return;
@@ -57,10 +55,11 @@ impl Person {
 
         let mut rng = rand::thread_rng();
 
-        // Symptomatic date, everything is computed in reference to that
-        // mean 2, standard deviation 3
-        let log_normal = LogNormal::new(SYMPTOMATIC_MEAN.ln(), SYMPTOMATIC_SD.ln()).unwrap();
-        let symptomatic_date: Time = date + log_normal.sample(&mut rng).round() as Time;
+        // Symptomatic date - 3, everything is computed in reference to that
+        // Contagious period is 2, at least one day of incubation
+        let log_normal =
+            LogNormal::new(SYMPTOMATIC_MEAN.ln() - 3_f64, SYMPTOMATIC_SD.ln()).unwrap();
+        let symptomatic_date: Time = date + log_normal.sample(&mut rng).round() as Time + 3;
         let testable_date = symptomatic_date - 2;
         let contagious_date = symptomatic_date - 2;
         let recovery_date = symptomatic_date + 10;
@@ -76,14 +75,16 @@ impl Person {
             contagious_date,
             symptomatic_date,
             recovery_date,
-            source,
+            //source,
         });
     }
 
     /// Runs a test on a person
-    pub fn test(self: &mut Self, date: Time) {
+    pub fn test(self: &mut Self, date: Time, delay: Time) {
         if let Some(infection) = &self.infection {
-            self.tested_positive = infection.testable_date <= date;
+            if infection.testable_date <= date {
+                self.tested_positive = Some(date + delay);
+            }
         }
     }
 
@@ -92,12 +93,12 @@ impl Person {
         if other.is_contagious(date) {
             self.expose(
                 date,
-                other.get_infection().as_ref().unwrap().source.to_string(),
+                //other.get_infection().as_ref().unwrap().source.to_string(),
             );
         }
 
         if self.is_contagious(date) {
-            other.expose(date, self.infection.as_ref().unwrap().source.to_string());
+            other.expose(date); //, self.infection.as_ref().unwrap().source.to_string());
         }
     }
 
@@ -111,8 +112,10 @@ impl Person {
 
     /// Is this person in a state where they should be isolating?
     pub fn is_isolating(self: &Self, date: Time) -> bool {
-        if self.tested_positive {
-            return true;
+        if let Some(tested_date) = self.tested_positive {
+            if tested_date <= date {
+                return true;
+            }
         }
         if let Some(infection) = &self.infection {
             if let Some(symptomatic_date) = infection.symptomatic_date {
@@ -154,10 +157,10 @@ impl Person {
     pub fn health_summary(self: &Self) {
         if let Some(infection) = &self.infection {
             println!(
-                "{} infected on {} by {} and is isolating? {}",
+                "{} infected on {} and is isolating? {}",
                 self.name,
                 infection.date,
-                infection.source,
+                //infection.source,
                 self.is_isolating(99999) // TODO
             );
         } else {
@@ -184,11 +187,11 @@ pub fn gen_phase_fn(a: u64, ac: u64, c: u64, ca: u64) -> Box<dyn Fn(Time) -> Pha
     let cycle_len = a + ac + c + ca;
     Box::new(move |day| {
         let cycle_day = day % cycle_len;
-        if cycle_day <= a {
+        if cycle_day < a {
             Phase::A
-        } else if cycle_day <= a + ac {
+        } else if cycle_day < a + ac {
             Phase::Isolate
-        } else if cycle_day <= a + ac + c {
+        } else if cycle_day < a + ac + c {
             Phase::C
         } else {
             Phase::Isolate
@@ -220,14 +223,14 @@ mod test {
         assert_eq!(me.name, "Olivia".to_string());
 
         // Get sick
-        me.expose(2, "MIT".to_string());
+        me.expose(2); //, "MIT".to_string());
 
         // Don't know better yet, should *not* be isolating...
         assert!(!me.is_isolating(2));
         assert!(me.was_sick(4)); // ...but am sick (hidden state)
 
-        // Get tested
-        me.test(12);
+        // Get tested, no delay
+        me.test(12, 0);
 
         // Really should be isolating
         assert!(me.is_isolating(12));
@@ -244,7 +247,7 @@ mod test {
         assert!(!c.was_sick(0));
 
         // Sick me gets sick
-        b.expose(10, "MIT".to_string());
+        b.expose(10); //, "MIT".to_string());
         assert!(b.was_sick(10));
 
         // Nobody's sick, but out of order
@@ -268,7 +271,7 @@ mod test {
         assert!(!sick_me.was_sick(0));
 
         // Sick me is sick
-        sick_me.expose(0, "MIT".to_string());
+        sick_me.expose(0); //, "MIT".to_string());
         assert!(sick_me.was_sick(2));
 
         // Interact
@@ -300,5 +303,96 @@ mod test {
         assert_eq!(phase(41), Phase::Isolate, "41 isolating");
 
         assert_eq!(phase(42), Phase::A, "42 with A");
+    }
+
+    #[test]
+    fn infectious_causality() {
+        for _ in 0..5000 {
+            let mut me = Person::new("Olivia".to_string());
+            me.expose(100);
+            me.test(100, 0);
+            assert!(!me.was_sick(99));
+            assert!(!me.is_isolating(100));
+        }
+    }
+
+    #[test]
+    fn delay_testing() {
+        for _ in 0..5_000 {
+            let mut me = Person::new("Olivia".to_string());
+            me.expose(100);
+            me.test(105, 2);
+            assert!(!me.is_isolating(100));
+            assert!(me.is_isolating(107)); // should ~always be true
+                                           //assert!(me.is_isolating(106)); // sometimes false
+        }
+    }
+
+    #[test]
+    fn gen_phase_fn_test() {
+        let phase_fn = gen_phase_fn(16, 5, 16, 5);
+        for day in 0..100 {
+            assert_eq!(
+                phase_fn(day),
+                phase(day),
+                "Day {}: gen says {:?}, should be {:?}",
+                day,
+                phase_fn(day),
+                phase(day),
+            );
+        }
+    }
+
+    #[test]
+    fn gen_phase_fn_test_hardcoded() {
+        let alt_fn = gen_phase_fn(1, 0, 1, 0);
+        for day in 0..100 {
+            if day % 2 == 0 {
+                assert_eq!(
+                    alt_fn(day),
+                    Phase::A,
+                    "Day {}: gen says {:?} should be {:?}",
+                    day,
+                    alt_fn(day),
+                    Phase::A
+                );
+            } else {
+                assert_eq!(
+                    alt_fn(day),
+                    Phase::C,
+                    "Day {}: gen says {:?} should be {:?}",
+                    day,
+                    alt_fn(day),
+                    Phase::C
+                );
+            }
+        }
+
+        let none_fn_1 = gen_phase_fn(0, 12, 0, 0);
+        let none_fn_2 = gen_phase_fn(0, 0, 0, 1);
+        let none_fn_3 = gen_phase_fn(0, 2, 0, 6);
+        for day in 0..100 {
+            assert_eq!(
+                none_fn_1(day),
+                Phase::Isolate,
+                "Day {}: gen_1 {:?} should be isolated",
+                day,
+                alt_fn(day),
+            );
+            assert_eq!(
+                none_fn_2(day),
+                Phase::Isolate,
+                "Day {}: gen_2 {:?} should be isolated",
+                day,
+                alt_fn(day),
+            );
+            assert_eq!(
+                none_fn_3(day),
+                Phase::Isolate,
+                "Day {}: gen_3 {:?} should be isolated",
+                day,
+                alt_fn(day),
+            );
+        }
     }
 }

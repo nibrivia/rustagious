@@ -12,7 +12,7 @@ type Res = (u64, u64);
 
 fn main() {
     println!("a, ac, c, ca, b_test, n, tot_days_unaware, n_infected");
-    let n = 1_000;
+    let n = 10_000;
     //for (a, ac, c, ca) in gen_phases() {
     gen_phases()
         .par_iter()
@@ -29,7 +29,7 @@ fn main() {
                 );
             }
 
-            for b_test in a + ac + c - 5..cycle_len {
+            for b_test in 0..cycle_len {
                 let outcomes = run_n(n, Some(b_test), cycle_len, phase_fn);
                 for (res, n) in outcomes {
                     println!(
@@ -44,13 +44,20 @@ fn main() {
 
 fn gen_phases() -> Vec<(u64, u64, u64, u64)> {
     let mut phases = Vec::new();
-    for duration in (14..43).step_by(14) {
-        for tot_isolation_days in (0..15).step_by(2) {
+
+    phases.push((1, 0, 1, 0)); // alternating
+    phases.push((16, 5, 16, 5)); // current
+
+    for duration in (14..29).step_by(14) {
+        phases.push((0, duration / 2, 0, duration / 2)); // isolating completly
+
+        for tot_isolation_days in (0..11).step_by(2) {
             let phase_duration = (duration - tot_isolation_days) / 2;
             if phase_duration < 5 {
                 continue;
             }
             for ac in 0..(tot_isolation_days + 1) {
+                // no isolating on weekends
                 if ac > 5 || tot_isolation_days - ac > 5 {
                     continue;
                 }
@@ -69,7 +76,7 @@ fn run_n(
 ) -> HashMap<Res, u64> {
     let mut res = HashMap::new();
 
-    for day in 0..6 * 7 {
+    for day in 0..cycle_len {
         for source in 1..4 {
             for _ in 0..n {
                 let run = run_trial(day, source, b_test, cycle_len, phase_fn);
@@ -97,9 +104,9 @@ fn run_trial(
 
     match who {
         //0 => z.expose(moment, format!("Z.{:}", moment)),
-        1 => a.expose(moment, format!("A.{:}", moment)),
-        2 => b.expose(moment, format!("B.{:}", moment)),
-        3 => c.expose(moment, format!("C.{:}", moment)),
+        1 => a.expose(moment), //, format!("A.{:}", moment)),
+        2 => b.expose(moment), //, format!("B.{:}", moment)),
+        3 => c.expose(moment), //, format!("C.{:}", moment)),
         //4 => d.expose(moment, format!("D.{:}", moment)),
         _ => unreachable!(),
     }
@@ -117,7 +124,7 @@ fn run_trial(
 
         match day % 7 {
             2 | 5 => {
-                a.test(day);
+                a.test(day, 1);
                 //b.test(day);
                 //c.test(day);
             }
@@ -128,7 +135,7 @@ fn run_trial(
         }
 
         if b_test.is_some() && day % cycle_len == b_test.unwrap() {
-            b.test(day);
+            b.test(day, 3);
         }
 
         match phase_fn(day) {
