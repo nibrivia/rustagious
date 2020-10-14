@@ -11,21 +11,37 @@ use std::collections::HashMap;
 type Res = (u64, u64);
 
 fn main() {
-    println!("a, ac, c, ca, b_test, n, tot_days_unaware, n_infected");
+    println!("a, ac, c, ca, offset, b_test, n, tot_days_unaware, n_infected");
     let n = 10_000;
     //for (a, ac, c, ca) in gen_phases() {
+    #[allow(clippy::print_literal)]
     gen_phases()
         .par_iter()
         .map(move |phase_desc| {
-            let (a, ac, c, ca) = *phase_desc;
+            let (a, ac, c, ca, offset) = *phase_desc;
             let cycle_len = a + ac + c + ca;
 
-            let phase_fn = &gen_phase_fn(a, ac, c, ca);
+            let phase_fn = &gen_phase_fn(a, ac, c, ca, offset);
+            for d in 0..cycle_len {
+                // isolate always, we keep that one
+                if a == 0 && c == 0 {
+                    continue;
+                }
+
+                // if it's the weekend
+                if d % 7 == 5 || d % 7 == 6 {
+                    // no isolation on the weekend...
+                    if phase_fn(d) == Phase::Isolate {
+                        return;
+                    }
+                }
+            }
+
             let outcomes = run_n(n, None, cycle_len, phase_fn);
             for (res, n) in outcomes {
                 println!(
-                    "{}, {}, {}, {}, {}, {}, {}, {}",
-                    a, ac, c, ca, "NA", n, res.0, res.1
+                    "{}, {}, {}, {}, {}, {}, {}, {}, {}",
+                    a, ac, c, ca, offset, "NA", n, res.0, res.1
                 );
             }
 
@@ -33,8 +49,8 @@ fn main() {
                 let outcomes = run_n(n, Some(b_test), cycle_len, phase_fn);
                 for (res, n) in outcomes {
                     println!(
-                        "{}, {}, {}, {}, {}, {}, {}, {}",
-                        a, ac, c, ca, b_test, n, res.0, res.1
+                        "{}, {}, {}, {}, {}, {}, {}, {}, {}",
+                        a, ac, c, ca, offset, b_test, n, res.0, res.1
                     );
                 }
             }
@@ -42,14 +58,19 @@ fn main() {
         .collect::<()>();
 }
 
-fn gen_phases() -> Vec<(u64, u64, u64, u64)> {
+fn gen_phases() -> Vec<(u64, u64, u64, u64, u64)> {
     let mut phases = Vec::new();
 
-    phases.push((1, 0, 1, 0)); // alternating
-    phases.push((16, 5, 16, 5)); // current
+    phases.push((1, 0, 1, 0, 0)); // alternating
+    for offset in 0..7 {
+        phases.push((16, 5, 16, 5, offset)); // current and variations
+    }
 
-    for duration in (14..29).step_by(14) {
-        phases.push((0, duration / 2, 0, duration / 2)); // isolating completly
+    phases.push((14, 0, 0, 0, 0)); // always A-B
+    phases.push((0, 0, 14, 0, 0)); // always C-B
+
+    for duration in (28..29).step_by(14) {
+        phases.push((0, duration / 2, 0, duration / 2, 0)); // isolating completly
 
         for tot_isolation_days in (0..11).step_by(2) {
             let phase_duration = (duration - tot_isolation_days) / 2;
@@ -61,7 +82,15 @@ fn gen_phases() -> Vec<(u64, u64, u64, u64)> {
                 if ac > 5 || tot_isolation_days - ac > 5 {
                     continue;
                 }
-                phases.push((phase_duration, ac, phase_duration, tot_isolation_days - ac));
+                for offset in 0..7 {
+                    phases.push((
+                        phase_duration,
+                        ac,
+                        phase_duration,
+                        tot_isolation_days - ac,
+                        offset,
+                    ));
+                }
             }
         }
     }
@@ -72,7 +101,7 @@ fn run_n(
     n: u64,
     b_test: Option<u64>,
     cycle_len: u64,
-    phase_fn: &Box<dyn Fn(u64) -> Phase>,
+    phase_fn: &dyn Fn(u64) -> Phase,
 ) -> HashMap<Res, u64> {
     let mut res = HashMap::new();
 
@@ -94,48 +123,43 @@ fn run_trial(
     who: u64,
     b_test: Option<u64>,
     cycle_len: u64,
-    phase_fn: &Box<dyn Fn(u64) -> Phase>,
+    phase_fn: &dyn Fn(u64) -> Phase,
 ) -> Res {
-    //let mut z = Person::new("0".to_string());
-    let mut a = Person::new("A".to_string());
-    let mut b = Person::new("B".to_string());
-    let mut c = Person::new("C".to_string());
-    //let mut d = Person::new("D".to_string());
+    let mut a = Person::new("".to_string());
+    let mut b = Person::new("".to_string());
+    let mut c = Person::new("".to_string());
 
     match who {
-        //0 => z.expose(moment, format!("Z.{:}", moment)),
         1 => a.expose(moment), //, format!("A.{:}", moment)),
         2 => b.expose(moment), //, format!("B.{:}", moment)),
         3 => c.expose(moment), //, format!("C.{:}", moment)),
-        //4 => d.expose(moment, format!("D.{:}", moment)),
         _ => unreachable!(),
     }
 
     let mut max_day = 0;
     for day in moment..300 {
         max_day = day;
-        if
-        //z.is_isolating(day) ||
-        a.is_isolating(day) || b.is_isolating(day) || c.is_isolating(day)
-        //|| d.is_isolating(day)
-        {
+
+        // someone is isolating, stop sim
+        if a.is_isolating(day) || b.is_isolating(day) || c.is_isolating(day) {
+            break;
+        }
+
+        // everyone has recovered, stop
+        if a.has_recovered(day) && b.has_recovered(day) && c.has_recovered(day) {
             break;
         }
 
         match day % 7 {
-            2 | 5 => {
+            1 | 4 => {
                 a.test(day, 1);
-                //b.test(day);
-                //c.test(day);
             }
-            3 | 6 => {
-                //z.test(day);
-            }
+            0 | 3 => {}
             _ => {}
         }
 
         if b_test.is_some() && day % cycle_len == b_test.unwrap() {
-            b.test(day, 3);
+            b.test(day, 2);
         }
 
         match phase_fn(day) {

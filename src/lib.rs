@@ -5,12 +5,17 @@
 
 use rand::distributions::{Bernoulli, Distribution};
 use rand_distr::LogNormal;
-use std::cmp::min;
+use std::cmp::{max, min};
 
 type Time = u64;
 
-const SYMPTOMATIC_MEAN: f64 = 5.058146;
-const SYMPTOMATIC_SD: f64 = 1.518921;
+// old
+//const SYMPTOMATIC_MU: f64 = 1.621;
+//const SYMPTOMATIC_SIGMA: f64 = 0.418;
+
+// meta https://bmjopen.bmj.com/content/bmjopen/10/8/e039652.full.pdf
+const SYMPTOMATIC_MU: f64 = 1.63;
+const SYMPTOMATIC_SIGMA: f64 = 0.5;
 
 /// Struct representing an individual and keeping track of associated state
 #[derive(Debug)]
@@ -23,7 +28,7 @@ pub struct Person {
 }
 
 /// Infection data
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Infection {
     date: Time,
 
@@ -55,13 +60,12 @@ impl Person {
 
         let mut rng = rand::thread_rng();
 
-        // Symptomatic date - 3, everything is computed in reference to that
+        // Symptomatic date, everything is computed in reference to that
         // Contagious period is 2, at least one day of incubation
-        let log_normal =
-            LogNormal::new(SYMPTOMATIC_MEAN.ln() - 3_f64, SYMPTOMATIC_SD.ln()).unwrap();
-        let symptomatic_date: Time = date + log_normal.sample(&mut rng).round() as Time + 3;
-        let testable_date = symptomatic_date - 2;
-        let contagious_date = symptomatic_date - 2;
+        let log_normal = LogNormal::new(SYMPTOMATIC_MU, SYMPTOMATIC_SIGMA).unwrap();
+        let symptomatic_date: Time = date + log_normal.sample(&mut rng).round() as Time;
+        let testable_date = max(date + 1, symptomatic_date - 2);
+        let contagious_date = max(date + 1, symptomatic_date - 2);
         let recovery_date = symptomatic_date + 10;
 
         // Do we show symptoms
@@ -77,6 +81,15 @@ impl Person {
             recovery_date,
             //source,
         });
+    }
+
+    /// True if the infection is done/has never happened
+    pub fn has_recovered(self: &mut Self, date: Time) -> bool {
+        if let Some(infection) = &self.infection {
+            date > infection.recovery_date
+        } else {
+            true
+        }
     }
 
     /// Runs a test on a person
@@ -183,10 +196,10 @@ pub enum Phase {
 }
 
 /// Returns custom phase function
-pub fn gen_phase_fn(a: u64, ac: u64, c: u64, ca: u64) -> Box<dyn Fn(Time) -> Phase> {
+pub fn gen_phase_fn(a: u64, ac: u64, c: u64, ca: u64, offset: u64) -> Box<dyn Fn(Time) -> Phase> {
     let cycle_len = a + ac + c + ca;
     Box::new(move |day| {
-        let cycle_day = day % cycle_len;
+        let cycle_day = (day + offset) % cycle_len;
         if cycle_day < a {
             Phase::A
         } else if cycle_day < a + ac {
@@ -206,8 +219,6 @@ pub fn phase(day: u64) -> Phase {
         Phase::A
     } else if cycle_day >= 21 && cycle_day <= 36 {
         Phase::C
-    //} else if cycle_day >= 40 {
-    //Phase::A
     } else {
         Phase::Isolate
     }
@@ -216,6 +227,7 @@ pub fn phase(day: u64) -> Phase {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn single_infected_tested_isolating() {
@@ -321,16 +333,112 @@ mod test {
         for _ in 0..5_000 {
             let mut me = Person::new("Olivia".to_string());
             me.expose(100);
-            me.test(105, 2);
-            assert!(!me.is_isolating(100));
-            assert!(me.is_isolating(107)); // should ~always be true
-                                           //assert!(me.is_isolating(106)); // sometimes false
+
+            let infection = me.get_infection().unwrap();
+            let t = infection.testable_date;
+
+            if let Some(s) = infection.symptomatic_date {
+                me.test(t, 5);
+                assert!(t <= s);
+
+                // no symptoms, or test result
+                for d in t..s {
+                    assert!(!me.is_isolating(d));
+                }
+
+                // should be isolating when we have symptoms
+                assert!(me.is_isolating(s));
+
+                // should be isolating when we get results back
+                assert!(me.is_isolating(t + 5));
+            } else {
+                // testing is too early
+                me.test(t - 1, 2);
+                assert!(!me.is_isolating(t + 1));
+
+                me.test(t, 5);
+                assert!(!me.is_isolating(t)); // should not be isolating yet
+                assert!(!me.is_isolating(t + 1));
+                assert!(!me.is_isolating(t + 2));
+                assert!(!me.is_isolating(t + 3));
+                assert!(!me.is_isolating(t + 4));
+                assert!(me.is_isolating(t + 5)); // got results, is isolating
+            }
+        }
+    }
+
+    #[test]
+    fn symptomatic_distribution_quantiles() {
+        let mut sympt_dist = HashMap::new();
+        let mut n_tot = 0;
+
+        // Get 10k samples where symptoms are shown
+        while n_tot < 10_000 {
+            let mut me = Person::new("Olivia".to_string());
+            me.expose(100);
+
+            let infection = me.get_infection().unwrap();
+
+            // only use symptomatic cases
+            if let Some(s) = infection.symptomatic_date {
+                n_tot += 1;
+                let incubation_days = s - 100;
+                let cur = sympt_dist
+                    .get(&incubation_days)
+                    .or_else(|| Some(&0))
+                    .unwrap()
+                    + 1;
+                sympt_dist.insert(incubation_days, cur);
+            }
+        }
+
+        // compute the cumulative distribution
+        let mut cum_dist = Vec::new();
+        let mut prev = 0;
+        for d in 0..100 {
+            let n = sympt_dist.get(&d).or_else(|| Some(&0)).unwrap();
+            cum_dist.push((prev + n) as f64 / (n_tot as f64));
+            prev += n;
+        }
+        assert!(prev == n_tot, "Expected prev {} == n_tot {}", prev, n_tot);
+
+        let percentiles: Vec<(f64, f64)> = vec![
+            (02.5, 1.92),
+            (05., 2.24),
+            (10., 2.69),
+            (25., 3.64),
+            (50., 5.10),
+            (75., 7.15),
+            (90., 9.69),
+            (95., 11.60),
+            (97.5, 13.60),
+        ];
+
+        // because we're dealing with integer days, make sure that the percentiles fall on the
+        // right day
+        for (p, expected) in percentiles {
+            let above = expected.round() as usize;
+            let below = above - 1;
+            assert!(
+                cum_dist[below] < (p / 100.) + 0.01,
+                "Expected cum_dist[{}] {:.3} to be <{}",
+                below,
+                cum_dist[below],
+                p / 100.
+            );
+            assert!(
+                cum_dist[above] > (p / 100.) - 0.01,
+                "Expected cum_dist[{}] {:.3} to be >{}",
+                below,
+                cum_dist[below],
+                p / 100.
+            );
         }
     }
 
     #[test]
     fn gen_phase_fn_test() {
-        let phase_fn = gen_phase_fn(16, 5, 16, 5);
+        let phase_fn = gen_phase_fn(16, 5, 16, 5, 0);
         for day in 0..100 {
             assert_eq!(
                 phase_fn(day),
@@ -345,7 +453,7 @@ mod test {
 
     #[test]
     fn gen_phase_fn_test_hardcoded() {
-        let alt_fn = gen_phase_fn(1, 0, 1, 0);
+        let alt_fn = gen_phase_fn(1, 0, 1, 0, 0);
         for day in 0..100 {
             if day % 2 == 0 {
                 assert_eq!(
@@ -368,9 +476,9 @@ mod test {
             }
         }
 
-        let none_fn_1 = gen_phase_fn(0, 12, 0, 0);
-        let none_fn_2 = gen_phase_fn(0, 0, 0, 1);
-        let none_fn_3 = gen_phase_fn(0, 2, 0, 6);
+        let none_fn_1 = gen_phase_fn(0, 12, 0, 0, 0);
+        let none_fn_2 = gen_phase_fn(0, 0, 0, 1, 0);
+        let none_fn_3 = gen_phase_fn(0, 2, 0, 6, 0);
         for day in 0..100 {
             assert_eq!(
                 none_fn_1(day),
@@ -393,6 +501,13 @@ mod test {
                 day,
                 alt_fn(day),
             );
+        }
+
+        let always_a = gen_phase_fn(5, 0, 0, 0, 0);
+        let always_c = gen_phase_fn(0, 0, 9, 0, 0);
+        for day in 0..100 {
+            assert_eq!(always_a(day), Phase::A);
+            assert_eq!(always_c(day), Phase::C);
         }
     }
 }
