@@ -20,9 +20,8 @@ const SYMPTOMATIC_SIGMA: f64 = 0.5;
 /// Struct representing an individual and keeping track of associated state
 #[derive(Debug)]
 pub struct Person {
-    /// Person's name for easy referencing
-    pub name: String,
-
+    // /// Person's name for easy referencing
+    //pub name: String,
     infection: Option<Infection>,
     tested_positive: Option<Time>,
 }
@@ -43,9 +42,9 @@ pub struct Infection {
 
 impl Person {
     /// Creates a new person
-    pub fn new(name: String) -> Person {
+    pub fn new(_name: String) -> Person {
         Person {
-            name,
+            //name,
             infection: None,
             tested_positive: None,
         }
@@ -166,6 +165,7 @@ impl Person {
         false
     }
 
+    /*
     /// Prints a health summary to stdout
     pub fn health_summary(self: &Self) {
         if let Some(infection) = &self.infection {
@@ -177,9 +177,10 @@ impl Person {
                 self.is_isolating(99999) // TODO
             );
         } else {
-            println!("{} healthy", self.name);
+            //println!("{} healthy", self.name);
         }
     }
+    */
 }
 
 /// Phase type
@@ -224,6 +225,55 @@ pub fn phase(day: u64) -> Phase {
     }
 }
 
+/// A structure fully describing a pattern
+#[derive(Debug)]
+pub struct PatternDesc {
+    n_people: usize,
+    cycles: Vec<CyclicPattern>,
+}
+
+/// A structure to describe actions that happen in a single date
+#[derive(Debug)]
+pub enum DailyAction {
+    /// The person with the given index gets tested
+    Test(usize),
+
+    /// The people with the given indices get tested
+    Interact(usize, usize),
+}
+
+/// Describes a singular periodic pattern
+#[derive(Debug)]
+pub struct CyclicPattern {
+    period: u64,
+    actions: Vec<Vec<DailyAction>>,
+}
+
+/// Runs through a cycle, testing each (person day) sick combination n times
+pub fn run_pattern(pattern: &PatternDesc, n: u64) {
+    let pattern_period = pattern
+        .cycles
+        .iter()
+        .max_by_key(|c| c.period)
+        .unwrap()
+        .period;
+    for day in 0..pattern_period {
+        for p in 0..pattern.n_people {
+            for _ in 0..n {
+                run_single(pattern, p, day);
+            }
+        }
+    }
+}
+
+fn run_single(pattern: &PatternDesc, person: usize, day: Time) {
+    println!("running {} {} of {:?}", person, day, pattern);
+    let mut people = Vec::new();
+    for _ in 0..pattern.n_people {
+        people.push(Person.new());
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -232,7 +282,7 @@ mod test {
     #[test]
     fn single_infected_tested_isolating() {
         let mut me = Person::new("Olivia".to_string());
-        assert_eq!(me.name, "Olivia".to_string());
+        //assert_eq!(me.name, "Olivia".to_string());
 
         // Get sick
         me.expose(2); //, "MIT".to_string());

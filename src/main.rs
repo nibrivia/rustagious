@@ -45,6 +45,7 @@ fn main() {
                 );
             }
 
+            /*
             for b_test in 0..cycle_len {
                 let outcomes = run_n(n, Some(b_test), cycle_len, phase_fn);
                 for (res, n) in outcomes {
@@ -54,6 +55,7 @@ fn main() {
                     );
                 }
             }
+            */
         })
         .collect::<()>();
 }
