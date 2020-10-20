@@ -42,7 +42,15 @@ pub struct Infection {
 
 impl Person {
     /// Creates a new person
-    pub fn new(_name: String) -> Person {
+    pub fn new() -> Person {
+        Person {
+            infection: None,
+            tested_positive: None,
+        }
+    }
+
+    /// Creates a new person
+    pub fn new_str(_name: String) -> Person {
         Person {
             //name,
             infection: None,
@@ -270,7 +278,7 @@ fn run_single(pattern: &PatternDesc, person: usize, day: Time) {
     println!("running {} {} of {:?}", person, day, pattern);
     let mut people = Vec::new();
     for _ in 0..pattern.n_people {
-        people.push(Person.new());
+        people.push(Person::new());
     }
 }
 
@@ -281,7 +289,7 @@ mod test {
 
     #[test]
     fn single_infected_tested_isolating() {
-        let mut me = Person::new("Olivia".to_string());
+        let mut me = Person::new_str("Olivia".to_string());
         //assert_eq!(me.name, "Olivia".to_string());
 
         // Get sick
@@ -301,9 +309,9 @@ mod test {
 
     #[test]
     fn interaction_abc_future() {
-        let mut a = Person::new("Olivia A".to_string());
-        let mut b = Person::new("Olivia B".to_string());
-        let mut c = Person::new("Olivia C".to_string());
+        let mut a = Person::new_str("Olivia A".to_string());
+        let mut b = Person::new_str("Olivia B".to_string());
+        let mut c = Person::new_str("Olivia C".to_string());
         assert!(!a.was_sick(0));
         assert!(!b.was_sick(0));
         assert!(!c.was_sick(0));
@@ -327,8 +335,8 @@ mod test {
 
     #[test]
     fn interaction() {
-        let mut healthy_me = Person::new("Olivia Healthy".to_string());
-        let mut sick_me = Person::new("Olivia Sick".to_string());
+        let mut healthy_me = Person::new_str("Olivia Healthy".to_string());
+        let mut sick_me = Person::new_str("Olivia Sick".to_string());
         assert!(!healthy_me.was_sick(0));
         assert!(!sick_me.was_sick(0));
 
@@ -370,7 +378,7 @@ mod test {
     #[test]
     fn infectious_causality() {
         for _ in 0..5000 {
-            let mut me = Person::new("Olivia".to_string());
+            let mut me = Person::new_str("Olivia".to_string());
             me.expose(100);
             me.test(100, 0);
             assert!(!me.was_sick(99));
@@ -381,7 +389,7 @@ mod test {
     #[test]
     fn delay_testing() {
         for _ in 0..5_000 {
-            let mut me = Person::new("Olivia".to_string());
+            let mut me = Person::new_str("Olivia".to_string());
             me.expose(100);
 
             let infection = me.get_infection().unwrap();
@@ -424,7 +432,7 @@ mod test {
 
         // Get 10k samples where symptoms are shown
         while n_tot < 10_000 {
-            let mut me = Person::new("Olivia".to_string());
+            let mut me = Person::new_str("Olivia".to_string());
             me.expose(100);
 
             let infection = me.get_infection().unwrap();
