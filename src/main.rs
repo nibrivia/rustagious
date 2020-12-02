@@ -11,8 +11,8 @@ use std::collections::HashMap;
 type Res = (u64, u64);
 
 fn main() {
-    println!("a, ac, c, ca, offset, b_test, n, tot_days_unaware, n_infected");
-    let n = 10_000;
+    println!("a, ac, c, ca, offset, a_test, b_test, n, tot_days_unaware, n_infected");
+    let n = 100_000;
     //for (a, ac, c, ca) in gen_phases() {
     #[allow(clippy::print_literal)]
     gen_phases()
@@ -37,11 +37,23 @@ fn main() {
                 }
             }
 
-            let outcomes = run_n(n, None, cycle_len, phase_fn);
+            // A is getting tested
+            let a_test = true;
+            let outcomes = run_n(n, a_test, None, cycle_len, phase_fn);
             for (res, n) in outcomes {
                 println!(
-                    "{}, {}, {}, {}, {}, {}, {}, {}, {}",
-                    a, ac, c, ca, offset, "NA", n, res.0, res.1
+                    "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}",
+                    a, ac, c, ca, offset, a_test, "NA", n, res.0, res.1
+                );
+            }
+
+            // B is no getting tested
+            let a_test = false;
+            let outcomes = run_n(n, a_test, None, cycle_len, phase_fn);
+            for (res, n) in outcomes {
+                println!(
+                    "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}",
+                    a, ac, c, ca, offset, a_test, "NA", n, res.0, res.1
                 );
             }
 
@@ -71,7 +83,7 @@ fn gen_phases() -> Vec<(u64, u64, u64, u64, u64)> {
     phases.push((14, 0, 0, 0, 0)); // always A-B
     phases.push((0, 0, 14, 0, 0)); // always C-B
 
-    for duration in (28..29).step_by(14) {
+    for duration in (14..43).step_by(14) {
         phases.push((0, duration / 2, 0, duration / 2, 0)); // isolating completly
 
         for tot_isolation_days in (0..11).step_by(2) {
@@ -101,6 +113,7 @@ fn gen_phases() -> Vec<(u64, u64, u64, u64, u64)> {
 
 fn run_n(
     n: u64,
+    a_test: bool,
     b_test: Option<u64>,
     cycle_len: u64,
     phase_fn: &dyn Fn(u64) -> Phase,
@@ -110,7 +123,7 @@ fn run_n(
     for day in 0..cycle_len {
         for source in 1..4 {
             for _ in 0..n {
-                let run = run_trial(day, source, b_test, cycle_len, phase_fn);
+                let run = run_trial(day, source, a_test, b_test, cycle_len, phase_fn);
                 let cur = res.get(&run).or_else(|| Some(&0)).unwrap() + 1;
                 res.insert(run, cur);
             }
@@ -123,13 +136,14 @@ fn run_n(
 fn run_trial(
     moment: u64,
     who: u64,
+    a_test: bool,
     b_test: Option<u64>,
     cycle_len: u64,
     phase_fn: &dyn Fn(u64) -> Phase,
 ) -> Res {
-    let mut a = Person::new("".to_string());
-    let mut b = Person::new("".to_string());
-    let mut c = Person::new("".to_string());
+    let mut a = Person::new();
+    let mut b = Person::new();
+    let mut c = Person::new();
 
     match who {
         1 => a.expose(moment), //, format!("A.{:}", moment)),
@@ -154,7 +168,9 @@ fn run_trial(
 
         match day % 7 {
             1 | 4 => {
-                a.test(day, 1);
+                if a_test {
+                    a.test(day, 1);
+                }
             }
             0 | 3 => {}
             _ => {}

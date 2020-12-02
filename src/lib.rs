@@ -6,6 +6,7 @@
 use rand::distributions::{Bernoulli, Distribution};
 use rand_distr::LogNormal;
 use std::cmp::{max, min};
+use std::collections::HashMap;
 
 type Time = u64;
 
@@ -38,6 +39,12 @@ pub struct Infection {
     symptomatic_date: Option<Time>,
     // Infection's original source
     //pub source: String,
+}
+
+impl Default for Person {
+    fn default() -> Self {
+        Person::new()
+    }
 }
 
 impl Person {
@@ -91,7 +98,7 @@ impl Person {
     }
 
     /// True if the infection is done/has never happened
-    pub fn has_recovered(self: &mut Self, date: Time) -> bool {
+    pub fn has_recovered(self: &Self, date: Time) -> bool {
         if let Some(infection) = &self.infection {
             date > infection.recovery_date
         } else {
@@ -243,10 +250,10 @@ pub struct PatternDesc {
 /// A structure to describe actions that happen in a single date
 #[derive(Debug)]
 pub enum DailyAction {
-    /// The person with the given index gets tested
+    /// (i, n) The person with the index i gets tested, the test is delayed by n days
     Test(usize),
 
-    /// The people with the given indices get tested
+    /// The people with the given indices get interact
     Interact(usize, usize),
 }
 
@@ -254,7 +261,8 @@ pub enum DailyAction {
 #[derive(Debug)]
 pub struct CyclicPattern {
     period: u64,
-    actions: Vec<Vec<DailyAction>>,
+    offset: u64,
+    actions: HashMap<Time, Vec<DailyAction>>,
 }
 
 /// Runs through a cycle, testing each (person day) sick combination n times
@@ -274,11 +282,58 @@ pub fn run_pattern(pattern: &PatternDesc, n: u64) {
     }
 }
 
-fn run_single(pattern: &PatternDesc, person: usize, day: Time) {
-    println!("running {} {} of {:?}", person, day, pattern);
+fn run_single(pattern: &PatternDesc, person: usize, start_day: Time) {
+    println!("running {} {} of {:?}", person, start_day, pattern);
+
+    // People init
     let mut people = Vec::new();
     for _ in 0..pattern.n_people {
         people.push(Person::new());
+    }
+
+    // Expose relevant person
+    people[person].expose(start_day);
+
+    // Run each day
+    for day in start_day..400 {
+        // Check if we're done
+        let mut anyone_isolating = false;
+        let mut everyone_recovered = true;
+        for p in &people {
+            if p.is_isolating(day) {
+                anyone_isolating = true;
+            }
+            if p.has_recovered(day) {
+                everyone_recovered = false;
+            }
+        }
+
+        if anyone_isolating || everyone_recovered {
+            break;
+        }
+
+        // check each cycle
+        for cycle in &pattern.cycles {
+            // check the current day
+            let cycle_day = (day + cycle.offset) % cycle.period;
+
+            // do all the actions for that day
+            if let Some(actions) = cycle.actions.get(&cycle_day) {
+                for a in actions {
+                    match a {
+                        DailyAction::Test(p_id) => people[*p_id].test(day, 1),
+                        DailyAction::Interact(p_a, p_b) => {
+                            if people[*p_a].is_contagious(day) {
+                                people[*p_b].expose(day);
+                            }
+                            if people[*p_b].is_contagious(day) {
+                                people[*p_a].expose(day);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -567,5 +622,10 @@ mod test {
             assert_eq!(always_a(day), Phase::A);
             assert_eq!(always_c(day), Phase::C);
         }
+    }
+
+    #[test]
+    fn pattern_test() {
+        assert!(true);
     }
 }
